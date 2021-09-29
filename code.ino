@@ -6,6 +6,8 @@
 
 // TODO: revisar bibliotecas necessárias
 
+#include <Metro.h>
+
 /*************************************************************/
 /*                         DIRETIVAS                         */
 /*************************************************************/
@@ -44,13 +46,6 @@
 
 /* Constantes */
 
-// tempo de espera até verificar novamente se o piloto
-// está vivo após a última confirmação
-#define DELAY_SEGURANCA 60000 * 5 // 300000 ms = 5 min
-
-// tempo de espera da confirmação do motorista
-#define TIMEOUT_SEGURANCA  20000 // 20 s
-
 #define TEMP_MAX 30 // °C
 #define TEMP_MIN 20 // °C
 
@@ -58,21 +53,19 @@
 #define VELOCIDADE_PADRAO_COOLER 100
 #define VELOCIDADE_MIN_COOLER 50
 
-// tempo de checagem de cada tarefa paralela
-#define DELAY_MICROFONE 500
-#define DELAY_VELOCIDADE 50
-#define DELAY_TEMPERATURA 2000
+// tempo de checagem de inatividade do motorista
+#define DELAY_SEGURANCA 60000 * 5 // 300000 ms = 5 min
 
 /************************************************************/
 /*                    VARIÁVEIS GLOBAIS                     */
 /************************************************************/
 
 // timestamps utilizados para controlar tarefas paralelas
-unsigned long ts_microfone = millis();
-unsigned long ts_velocidade = millis();
-unsigned long ts_temperatura = millis();
-unsigned long ts_seguranca = millis();
-unsigned long ts_motorista_vivo = millis();
+Metro taskBotaoMicrofone = Metro(500);
+Metro taskBotaoCooler = Metro(500);
+Metro taskAtualizarVelocidade = Metro(50);
+Metro taskChecarTemperatura = Metro(100);
+Metro taskSeguranca = Metro(DELAY_SEGURANCA); 
 
 // variáveis de estado (guardam o valor dos sensores)
 int isSistemaLigado = 0;
@@ -199,11 +192,7 @@ void desligarComponentes() {
  */
 void atualizarVelocidade() {
   // verifica se é hora de checar os sensores de velocidade
-  if (millis() - ts_velocidade >= DELAY_VELOCIDADE) {
-
-    // atualiza o timestamp
-    ts_velocidade += DELAY_VELOCIDADE;
-  	
+  if (taskAtualizarVelocidade.check()) {
     velocidadeAtual = getValorAnalogicoDigital(HALL_VELOCIDADE);
     rotacaoAtual = getValorAnalogicoDigital(HALL_ROTACAO);
     aceleracaoAtual = getValorAnalogicoDigital(HALL_ACELERACAO);
@@ -215,9 +204,7 @@ void atualizarVelocidade() {
  * Faz a leitura dos sensores de temperatura e liga/desliga o cooler de acordo
  */
 void checarTemperatura() {
-  if (millis() - ts_temperatura >= DELAY_TEMPERATURA) {
-    ts_temperatura += DELAY_TEMPERATURA;
-
+  if (taskChecarTemperatura.check()) {
     temperaturaAtual = analogRead(SENSOR_TEMP);
 
     // verifica se a temperatura excedeu o limite máximo
@@ -240,13 +227,12 @@ void checarTemperatura() {
 // FIXME: consultar comportamento esperado do sistema
 void checarVidaMotorista() {
   // verifica se é hora de checar se o motorista está vivo
-  if (millis() - ts_motorista_vivo >= DELAY_SEGURANCA) {
+  if (taskSeguranca.check()) {
+    // continuar esperando pelo sinal de vida durante um certo tempo (timeout) ?
     int isMotoristaVivo = lerEstadoBotao(BTN_TOVIVO);
-    ts_motorista_vivo += isMotoristaVivo ? DELAY_SEGURANCA : TIMEOUT_SEGURANCA;
 
-  // continuar esperando pelo sinal de vida durante um certo tempo (timeout) ?
-  } else if (millis() - ts_motorista_vivo < TIMEOUT_SEGURANCA) {
-    alertarInatividade();
+    if (!isMotoristaVivo)
+      alertarInatividade();
   }
 }
 
@@ -256,22 +242,27 @@ void alertarInatividade() {
 
 /** Verifica se o botão de resfriamento foi acionado */
 void checarBotaoCooler() {
-  // Checa se o botão Cooler foi pressionado
-  int isBotaoCoolerOn = lerEstadoBotao(BTN_RESFRIAMENTO);
+  if (taskBotaoCooler.check()) {
+    // Checa se o botão Cooler foi pressionado
+    int isBotaoCoolerOn = lerEstadoBotao(BTN_RESFRIAMENTO);
 
-  if (isBotaoCoolerOn)
-    isCoolerAtivo = !isCoolerAtivo;
+    // se o botão foi pressionado, troca o estado do cooler
+    if (isBotaoCoolerOn)
+      isCoolerAtivo = !isCoolerAtivo;
 
-  if (isCoolerAtivo)
-    ligarCooler(VELOCIDADE_PADRAO_COOLER);
-  else
-    desligarCooler();
+    if (isCoolerAtivo)
+      ligarCooler(VELOCIDADE_PADRAO_COOLER);
+    else
+      desligarCooler();
+  }
 }
 
 void checarSeguranca() {
   checarVidaMotorista();
   checarBotaoCooler();
 
+  // FIXME: verificar o que fazer com o sistema de resfriamento automático
+  // quando o cooler já tiver sido acionado pelo motorista
   if (!isCoolerAtivo) {
     checarTemperatura();
   }

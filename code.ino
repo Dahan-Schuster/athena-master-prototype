@@ -9,7 +9,7 @@
 #include <Metro.h>                // biblioteca para facilitar multitasking
 
 #include <SPI.h>                  // protocolo de comunicação SPI
-#include <Wire.h>                 // protocolo de comunicação 
+#include <Wire.h>                 // protocolo de comunicação I2C
 #include <Adafruit_GFX.h>         // display oled
 #include <Adafruit_SSD1306.h>     // display oled
 
@@ -54,9 +54,9 @@
 
 #define PLAYER            0
 
-#define OLED_SCL          22
-#define OLED_SDA          21
-#define OLED_RESET        -1 // Reset pin # (or -1 if sharing Arduino reset pin)
+#define OLED_SCL          22 // pino I2C
+#define OLED_SDA          21 // pino I2C
+#define OLED_RESET        -1 // pino reset (-1 caso o display não possua)
 
 /* Constantes */
 
@@ -114,7 +114,7 @@ static const PROGMEM uint8_t micIcon[MIC_ICON_WIDTH * MIC_ICON_HEIGHT / MIC_PX_P
   0xBE, 0x80, 0xBE, 0x80, 0xDD, 0x80, 0x63, 0x00, 0x3E, 0x00, 0x08, 0x00, 0x08, 0x00, 0x3E, 0x00
 };
 
-// sensore de temperatura e humidade
+// sensor de temperatura e humidade
 DHT dht(SENSOR_TEMP, DHT_TYPE);
 
 // variáveis de estado (guardam o valor dos sensores)
@@ -197,7 +197,7 @@ void desligarCooler() {
 /**
  * Lê o estado de um push button, recebendo seu pin como parâmetro
  * Impede de ler mais de um valor caso o botão continue pressionado
-    // FIXME: melhorar o método para não usar delay
+ * FIXME: melhorar o método para não usar delay
  */
 int lerEstadoBotao(int pin) {
   int estado = digitalRead(pin);
@@ -294,10 +294,12 @@ void checarBotaoCooler() {
   }
 }
 
-/** Verifica sinais vitais do motorista e dispara o alerta de inatividade */
-// FIXME:
-// Colocar um aviso prévio (buzzer, led)
-// Colocar outro botão de segurança por backup
+/**
+ * Verifica sinais vitais do motorista e dispara o alerta de inatividade
+ * FIXME:
+ *  Colocar um aviso prévio (buzzer, led)
+ *  Colocar outro botão de segurança por backup
+ */
 void checarVidaMotorista() {
   // verifica se é hora de checar se o motorista está vivo
   if (taskSeguranca.check()) {

@@ -76,21 +76,45 @@
 #define CODIGO_ERRO_DISPLAY 3 // beeps
 #define CODIGO_ERRO_DHT     5
 
+
+// dimensões dos ícones mostrados no display oled
+#define COOLER_ICON_HEIGHT   16
+#define COOLER_ICON_WIDTH    16
+#define COOLER_PX_PER_BYTE   8
+
+#define MIC_ICON_HEIGHT   16
+#define MIC_ICON_WIDTH    16
+#define MIC_PX_PER_BYTE   8
+
 /************************************************************/
 /*                    VARIÁVEIS GLOBAIS                     */
 /************************************************************/
 
 // objetos utilizados para controlar tarefas paralelas
 // define um intervalo em ms para execução de processos
-Metro taskBotaoMicrofone = Metro(500);
-Metro taskBotaoCooler = Metro(500);
-Metro taskAtualizarVelocidade = Metro(50);
-Metro taskChecarTemperatura = Metro(100);
-Metro taskSeguranca = Metro(DELAY_SEGURANCA);
+Metro taskBotaoMicrofone = Metro(500);        // 0.5 s
+Metro taskBotaoCooler = Metro(500);           // 0.5 s
+Metro taskAtualizarVelocidade = Metro(50);    // 50 ms
+Metro taskChecarTemperatura = Metro(10000);   // 10 s
+Metro taskSeguranca = Metro(DELAY_SEGURANCA); // 5 min
+Metro taskMostrarDadosDisplay = Metro(200);   // 0.2 s
 
 // Display oled
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
+// array bitmap do ícone de cooler mostrado no display
+static const PROGMEM uint8_t coolerIcon[COOLER_ICON_WIDTH * COOLER_ICON_HEIGHT / COOLER_PX_PER_BYTE] = { 
+  0x03, 0x00, 0x0F, 0x10, 0x0F, 0x3C, 0x0F, 0x7E, 0x47, 0x7C, 0xF7, 0xF0, 0xFF, 0xE0, 0xFE, 0x7E,
+  0x7E, 0x7F, 0x07, 0xFF, 0x0F, 0xEF, 0x3E, 0xE2, 0x7E, 0xF0, 0x3C, 0xF0, 0x08, 0xF0, 0x00, 0xC0
+};
+
+// array bitmap do ícone de microfone mostrado no display
+static const PROGMEM uint8_t micIcon[MIC_ICON_WIDTH * MIC_ICON_HEIGHT / MIC_PX_PER_BYTE] = { 
+  0x1C, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0xBE, 0x80,
+  0xBE, 0x80, 0xBE, 0x80, 0xDD, 0x80, 0x63, 0x00, 0x3E, 0x00, 0x08, 0x00, 0x08, 0x00, 0x3E, 0x00
+};
+
+// sensore de temperatura e humidade
 DHT dht(SENSOR_TEMP, DHT_TYPE);
 
 // variáveis de estado (guardam o valor dos sensores)
@@ -173,6 +197,7 @@ void desligarCooler() {
 /**
  * Lê o estado de um push button, recebendo seu pin como parâmetro
  * Impede de ler mais de um valor caso o botão continue pressionado
+    // FIXME: melhorar o método para não usar delay
  */
 int lerEstadoBotao(int pin) {
   int estado = digitalRead(pin);
@@ -180,7 +205,6 @@ int lerEstadoBotao(int pin) {
   // se o botão foi pressionado, suspende
   // o programa até que seja solto
   while (digitalRead(pin) == HIGH) {
-    // FIXME: melhorar o método para não usar delay
     delay(100);
   }
   
@@ -301,35 +325,59 @@ void checarSeguranca() {
 
 /** Apresenta as variáveis de controle no display oled */
 void mostrarDadosNoDisplay() {
-  display.clearDisplay();
-  display.setTextColor(WHITE);
-  
-  // cooler ativo
-  // microfone ativo
-  // aceleração
-  // velocidade
-  // rotação
-  // frenagem
+  if (taskMostrarDadosDisplay.check()) {
+    display.clearDisplay();
+    
+    // aceleração
+    // rotação
+    // frenagem
 
-  // temperatura
-  display.setTextSize(1);
-  display.setCursor(1,1);
-  display.print("Temp ");
-  display.write(167);
-  display.print("C");
-  display.setTextSize(2);
-  display.setCursor(0,10);
-  display.print(temperaturaAtual);
-  
-  // humidade
-  display.setTextSize(1);
-  display.setCursor(65, 0);
-  display.print("Hum %");
-  display.setTextSize(2);
-  display.setCursor(65, 10);
-  display.print(humidadeAtual);
-  
-  display.display(); 
+    // temperatura
+    display.setTextSize(1);
+    display.setCursor(0,0);
+    display.print("Temp ");
+    display.write(167);
+    display.print("C");
+    display.setTextSize(2);
+    display.setCursor(0,10);
+    display.print(temperaturaAtual);
+    
+    // humidade
+    display.setTextSize(1);
+    display.setCursor(65, 0);
+    display.print("Hum %");
+    display.setTextSize(2);
+    display.setCursor(65, 10);
+    display.print(humidadeAtual);
+    
+    // velocidade
+    display.setTextSize(1);
+    display.setCursor(0, 32);
+    display.print("Vel Km/h");
+    display.setTextSize(2);
+    display.setCursor(0, 42);
+    display.print(velocidadeAtual);
+
+    // Ícone cooler
+    static int coolerIconDisplayed = 0; // usado para fazer o ícone piscar na tela
+    if (isCoolerAtivo) {
+      if (!coolerIconDisplayed)
+        display.drawBitmap(95, 40, coolerIcon, COOLER_ICON_WIDTH, COOLER_ICON_HEIGHT, 1);
+
+      coolerIconDisplayed = !coolerIconDisplayed;
+    }
+
+    // Ícone microfone
+    static int micIconDisplayed = 0;    // usado para fazer o ícone piscar na tela
+    if (isMicrofoneAtivo) {
+      if (!micIconDisplayed)
+        display.drawBitmap(115, 40, micIcon, MIC_ICON_WIDTH, MIC_ICON_HEIGHT, 1);
+
+      micIconDisplayed = !micIconDisplayed;
+    }
+
+    display.display();
+  }
 }
 
 /** Executa os processos paralelos do sistema */

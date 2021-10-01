@@ -16,8 +16,8 @@
     - [ ] Leitura da voz quando o botão de fala estiver ativado
     - [ ] Controle da caixa de som
   - [ ] Display Oled
-    - [ ] Mostrar dados de velocidade
-    - [ ] Mostrar temperatura e humidade
-    - [ ] Mostrar problemas encontrados
-    - [ ] Mostrar nível da bateria (?)
+    - [x] Mostrar dados de velocidade
+    - [x] Mostrar temperatura e humidade
+    - [x] Mostrar ícones do cooler e do microfone
+    - [x] Mostrar problemas encontrados
 - [ ] Diagrama

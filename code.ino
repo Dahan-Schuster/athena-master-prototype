@@ -6,7 +6,14 @@
 
 // TODO: revisar bibliotecas necessárias
 
-#include <Metro.h>      // biblioteca para facilitar multitasking
+#include <Metro.h>                // biblioteca para facilitar multitasking
+
+#include <SPI.h>                  // protocolo de comunicação SPI
+#include <Wire.h>                 // protocolo de comunicação 
+#include <Adafruit_GFX.h>         // display oled
+#include <Adafruit_SSD1306.h>     // display oled
+
+#include <DHT.h>                  // DHT11
 
 /*************************************************************/
 /*                         DIRETIVAS                         */
@@ -17,7 +24,7 @@
 /* Entradas */
 
 // entrada digital
-#define BTN_INICIAR       334
+#define BTN_INICIAR       33
 #define BTN_TOVIVO        35
 #define BTN_RESFRIAMENTO  32
 #define BTN_FALA          25
@@ -28,28 +35,46 @@
 #define HALL_ROTACAO      16
 #define HALL_VELOCIDADE   18
 
-#define SENSOR_TEMP       19
+#define SENSOR_TEMP       14
+#define DHT_TYPE          DHT11
 
 /* Saídas */
 
 // saída digital
-#define LED_BTN_FALA      1
+#define LED_BTN_FALA      0
+
+#define LED_ERRO_INTERNO  0
+
+#define LED_INATIVIDADE   0
+#define BUZZER            0
+
 
 // saída analógica
-#define COOLER            A7
+#define COOLER            0
 
-#define PLAYER            A8
+#define PLAYER            0
 
-#define DISPLAY_OLED      A9
+#define OLED_SCL          22
+#define OLED_SDA          21
+#define OLED_RESET        -1 // Reset pin # (or -1 if sharing Arduino reset pin)
 
 /* Constantes */
 
 #define TEMP_MAX          30 // °C
+#define HUMD_MAX          90 // % 
 
 #define VELOCIDADE_COOLER 100
 
 // tempo de checagem de inatividade do motorista
 #define DELAY_SEGURANCA   60000 * 5 // 300000 ms = 5 min
+
+// tamanho da tela do display oled
+#define SCREEN_WIDTH      128 // px
+#define SCREEN_HEIGHT      64 // px
+
+// códigos de erro interno, representando o número de beeps a tocar
+#define CODIGO_ERRO_DISPLAY 3 // beeps
+#define CODIGO_ERRO_DHT     5
 
 /************************************************************/
 /*                    VARIÁVEIS GLOBAIS                     */
@@ -61,7 +86,12 @@ Metro taskBotaoMicrofone = Metro(500);
 Metro taskBotaoCooler = Metro(500);
 Metro taskAtualizarVelocidade = Metro(50);
 Metro taskChecarTemperatura = Metro(100);
-Metro taskSeguranca = Metro(DELAY_SEGURANCA); 
+Metro taskSeguranca = Metro(DELAY_SEGURANCA);
+
+// Display oled
+Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+
+DHT dht(SENSOR_TEMP, DHT_TYPE);
 
 // variáveis de estado (guardam o valor dos sensores)
 int isSistemaLigado = 0;
@@ -73,6 +103,8 @@ int isMicrofoneAtivo = 0;
 int isMotoristaVivo = 1;
 
 float temperaturaAtual = 0;
+
+float humidadeAtual = 0;
 
 float aceleracaoAtual = 0;
 
@@ -90,6 +122,7 @@ float rotacaoAtual = 0;
 /************************************************************/
 
 /** Configura a utilização dos pinos do Arduino */
+// FIXME: revisar configuração dos pinos
 void configurarPinos() {
   pinMode(BTN_INICIAR, INPUT);
   pinMode(BTN_TOVIVO, INPUT);
@@ -100,14 +133,27 @@ void configurarPinos() {
   pinMode(HALL_ROTACAO, INPUT);
   pinMode(HALL_VELOCIDADE, INPUT);
   pinMode(SENSOR_TEMP, INPUT);
-  pinMode(MICROFONE, INPUT);
 
   pinMode(LED_BTN_FALA, OUTPUT);
+  pinMode(LED_ERRO_INTERNO, OUTPUT);
+  pinMode(LED_INATIVIDADE, OUTPUT);
+  pinMode(BUZZER, OUTPUT);
   pinMode(COOLER, OUTPUT);
   pinMode(PLAYER, OUTPUT);
-  pinMode(DISPLAY_OLED, OUTPUT);
+
+  digitalWrite(LED_ERRO_INTERNO, LOW);
+
+  dht.begin();
 }
 
+void inicializarDisplay() {
+  if(!display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) { 
+    alertarErroInterno(CODIGO_ERRO_DISPLAY);
+  }
+
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+}
 
 /* ====================================
  * Funções que guardam a lógica de
@@ -124,11 +170,6 @@ void desligarCooler() {
   analogWrite(COOLER, LOW);
 }
 
-/* ====================================
- * Funções que guardam a lógica de
- * ativação/desativação dos componentes
- * ==================================== */
-
 /**
  * Lê o estado de um push button, recebendo seu pin como parâmetro
  * Impede de ler mais de um valor caso o botão continue pressionado
@@ -139,7 +180,7 @@ int lerEstadoBotao(int pin) {
   // se o botão foi pressionado, suspende
   // o programa até que seja solto
   while (digitalRead(pin) == HIGH) {
-    // espera 0.1s antes de verificar o estado de novo
+    // FIXME: melhorar o método para não usar delay
     delay(100);
   }
   
@@ -193,12 +234,17 @@ void atualizarVelocidade() {
  */
 void checarTemperatura() {
   if (taskChecarTemperatura.check()) {
-    temperaturaAtual = analogRead(SENSOR_TEMP);
+    temperaturaAtual = dht.readTemperature();
+    humidadeAtual = dht.readHumidity();
+
+    if (isnan(temperaturaAtual) || isnan(humidadeAtual)) {
+      alertarErroInterno(CODIGO_ERRO_DHT);
+    }
 
     // se o cooler não já estiver ativo
     if(!isCoolerAtivo) {
       // verifica se a temperatura excedeu o limite máximo
-      if (temperaturaAtual >= TEMP_MAX) {
+      if (temperaturaAtual >= TEMP_MAX || humidadeAtual >= HUMD_MAX) {
         ligarCooler();
       } else {
         desligarCooler();
@@ -225,13 +271,12 @@ void checarBotaoCooler() {
 }
 
 /** Verifica sinais vitais do motorista e dispara o alerta de inatividade */
-// TODO:
+// FIXME:
 // Colocar um aviso prévio (buzzer, led)
 // Colocar outro botão de segurança por backup
 void checarVidaMotorista() {
   // verifica se é hora de checar se o motorista está vivo
   if (taskSeguranca.check()) {
-    // continuar esperando pelo sinal de vida durante um certo tempo (timeout) ?
     int isMotoristaVivo = lerEstadoBotao(BTN_TOVIVO);
 
     if (!isMotoristaVivo)
@@ -254,10 +299,62 @@ void checarSeguranca() {
   checarBotaoCooler();
 }
 
+/** Apresenta as variáveis de controle no display oled */
+void mostrarDadosNoDisplay() {
+  display.clearDisplay();
+  display.setTextColor(WHITE);
+  
+  // cooler ativo
+  // microfone ativo
+  // aceleração
+  // velocidade
+  // rotação
+  // frenagem
+
+  // temperatura
+  display.setTextSize(1);
+  display.setCursor(1,1);
+  display.print("Temp ");
+  display.write(167);
+  display.print("C");
+  display.setTextSize(2);
+  display.setCursor(0,10);
+  display.print(temperaturaAtual);
+  
+  // humidade
+  display.setTextSize(1);
+  display.setCursor(65, 0);
+  display.print("Hum %");
+  display.setTextSize(2);
+  display.setCursor(65, 10);
+  display.print(humidadeAtual);
+  
+  display.display(); 
+}
+
 /** Executa os processos paralelos do sistema */
 void executarProcessos() {
   atualizarVelocidade();
   checarSeguranca();
+  mostrarDadosNoDisplay();
+}
+
+/** Desliga o sistema e beepa o código de erro */
+void alertarErroInterno(int codigoErro) {
+  desligar();
+  int i;
+
+  while(true) {
+    for (i = 0; i < codigoErro; i++) {
+      digitalWrite(LED_ERRO_INTERNO, HIGH);
+      tone(BUZZER, 440, 500);
+      delay(800);
+      noTone(BUZZER);
+      digitalWrite(LED_ERRO_INTERNO, LOW);
+    }
+
+    delay(1250);
+  }
 }
 
 /************************************************************/
@@ -296,6 +393,7 @@ void reinicar() {
 
 void setup() {
   configurarPinos();
+  inicializarDisplay();
 }
 
 void loop() { 

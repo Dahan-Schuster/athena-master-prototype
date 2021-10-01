@@ -9,7 +9,7 @@
   - [ ] Módulo de segurança
     - [x] Leitura do sensor de temperatura
     - [ ] Leitura do botão de motorista vivo
-    - [ ] Leitura do botão de ativação da ventoinha
+    - [x] Leitura do botão de ativação da ventoinha
     - [x] Ativação da ventoinha
   - [ ] Módulo de comunicação
     - [ ] Leitura do botão de fala

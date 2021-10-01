@@ -6,7 +6,7 @@
 
 // TODO: revisar bibliotecas necessárias
 
-#include <Metro.h>
+#include <Metro.h>      // biblioteca para facilitar multitasking
 
 /*************************************************************/
 /*                         DIRETIVAS                         */
@@ -17,50 +17,46 @@
 /* Entradas */
 
 // entrada digital
-#define BTN_INICIAR 1
-#define BTN_TOVIVO 2
-#define BTN_RESFRIAMENTO 3
-#define BTN_FALA 4
+#define BTN_INICIAR       334
+#define BTN_TOVIVO        35
+#define BTN_RESFRIAMENTO  32
+#define BTN_FALA          25
 
 // entrada analógica
-#define HALL_ACELERACAO A1
-#define HALL_FRENAGEM A2
-#define HALL_ROTACAO A3
-#define HALL_VELOCIDADE A4
+#define HALL_ACELERACAO   5
+#define HALL_FRENAGEM     17
+#define HALL_ROTACAO      16
+#define HALL_VELOCIDADE   18
 
-#define SENSOR_TEMP A5
-
-#define MICROFONE A6
+#define SENSOR_TEMP       19
 
 /* Saídas */
 
 // saída digital
-#define LED_BTN_FALA 1
+#define LED_BTN_FALA      1
 
 // saída analógica
-#define COOLER A7
+#define COOLER            A7
 
-#define PLAYER A8
+#define PLAYER            A8
 
-#define DISPLAY_OLED A9
+#define DISPLAY_OLED      A9
 
 /* Constantes */
 
-#define TEMP_MAX 30 // °C
-#define TEMP_MIN 20 // °C
+#define TEMP_MAX          30 // °C
 
-#define VELOCIDADE_MAX_COOLER 150
-#define VELOCIDADE_PADRAO_COOLER 100
-#define VELOCIDADE_MIN_COOLER 50
+#define VELOCIDADE_COOLER 100
 
 // tempo de checagem de inatividade do motorista
-#define DELAY_SEGURANCA 60000 * 5 // 300000 ms = 5 min
+#define DELAY_SEGURANCA   60000 * 5 // 300000 ms = 5 min
 
 /************************************************************/
 /*                    VARIÁVEIS GLOBAIS                     */
 /************************************************************/
 
-// timestamps utilizados para controlar tarefas paralelas
+// objetos utilizados para controlar tarefas paralelas
+// define um intervalo em ms para execução de processos
 Metro taskBotaoMicrofone = Metro(500);
 Metro taskBotaoCooler = Metro(500);
 Metro taskAtualizarVelocidade = Metro(50);
@@ -76,17 +72,15 @@ int isMicrofoneAtivo = 0;
 
 int isMotoristaVivo = 1;
 
-int temperaturaAtual = 0;
+float temperaturaAtual = 0;
 
-int aceleracaoAtual = 0;
+float aceleracaoAtual = 0;
 
-int frenagemAtual = 0;
+float frenagemAtual = 0;
 
-int velocidadeAtual = 0;
+float velocidadeAtual = 0;
 
-int rotacaoAtual = 0;
-
-int velocidadeCooler = 0;
+float rotacaoAtual = 0;
 
 /************************************************************/
 /*                FUNÇÕES DE BAIXO NÍVEL                    */
@@ -120,19 +114,13 @@ void configurarPinos() {
  * ativação/desativação dos componentes
  * ==================================== */
 
-void ligarLed(int pin) { 
-  digitalWrite(pin, HIGH);
-}
-
-void desligarLed(int pin) {
-  digitalWrite(pin, LOW);
-}
-
-void ligarCooler(int velocidade) {
-  analogWrite(COOLER, velocidade);
+void ligarCooler() {
+  isCoolerAtivo = 1;
+  analogWrite(COOLER, VELOCIDADE_PADRAO_COOLER);
 }
 
 void desligarCooler() {
+  isCoolerAtivo = 0;
   analogWrite(COOLER, LOW);
 }
 
@@ -161,7 +149,7 @@ int lerEstadoBotao(int pin) {
 /**
  * Lê o valor de um pino como analógico e o retorna convertido para digital
  */
-int getValorAnalogicoDigital(int pin) {
+float getValorAnalogicoDigital(int pin) {
   // Lê o valor analógico do potenciômetro,
   // que varia entre 0 e 1023
   int valorAnalogico = analogRead(pin);
@@ -207,37 +195,16 @@ void checarTemperatura() {
   if (taskChecarTemperatura.check()) {
     temperaturaAtual = analogRead(SENSOR_TEMP);
 
-    // verifica se a temperatura excedeu o limite máximo
-    if (temperaturaAtual >= TEMP_MAX) {
-      // aumenta gradativamente a velocidade do cooler
-      if (velocidadeCooler <= VELOCIDADE_MAX_COOLER) velocidadeCooler += 20;
-
-      ligarCooler(velocidadeCooler);
-    } else if (temperaturaAtual <= TEMP_MIN) {
-      if (velocidadeCooler > VELOCIDADE_MIN_COOLER) velocidadeCooler -= 20;
-
-      ligarCooler(velocidadeCooler);
-    } else {
-      desligarCooler();
+    // se o cooler não já estiver ativo
+    if(!isCoolerAtivo) {
+      // verifica se a temperatura excedeu o limite máximo
+      if (temperaturaAtual >= TEMP_MAX) {
+        ligarCooler();
+      } else {
+        desligarCooler();
+      }
     }
   }
-}
-
-/** Verifica sinais vitais do motorista e dispara o alerta de inatividade */
-// FIXME: consultar comportamento esperado do sistema
-void checarVidaMotorista() {
-  // verifica se é hora de checar se o motorista está vivo
-  if (taskSeguranca.check()) {
-    // continuar esperando pelo sinal de vida durante um certo tempo (timeout) ?
-    int isMotoristaVivo = lerEstadoBotao(BTN_TOVIVO);
-
-    if (!isMotoristaVivo)
-      alertarInatividade();
-  }
-}
-
-// TODO: alerta de inatividade do motorista
-void alertarInatividade() {
 }
 
 /** Verifica se o botão de resfriamento foi acionado */
@@ -251,26 +218,44 @@ void checarBotaoCooler() {
       isCoolerAtivo = !isCoolerAtivo;
 
     if (isCoolerAtivo)
-      ligarCooler(VELOCIDADE_PADRAO_COOLER);
+      ligarCooler();
     else
       desligarCooler();
   }
 }
 
-void checarSeguranca() {
-  checarVidaMotorista();
-  checarBotaoCooler();
+/** Verifica sinais vitais do motorista e dispara o alerta de inatividade */
+// TODO:
+// Colocar um aviso prévio (buzzer, led)
+// Colocar outro botão de segurança por backup
+void checarVidaMotorista() {
+  // verifica se é hora de checar se o motorista está vivo
+  if (taskSeguranca.check()) {
+    // continuar esperando pelo sinal de vida durante um certo tempo (timeout) ?
+    int isMotoristaVivo = lerEstadoBotao(BTN_TOVIVO);
 
-  // FIXME: verificar o que fazer com o sistema de resfriamento automático
-  // quando o cooler já tiver sido acionado pelo motorista
-  if (!isCoolerAtivo) {
-    checarTemperatura();
+    if (!isMotoristaVivo)
+      alertarInatividade();
   }
 }
 
+// TODO: alerta de inatividade do motorista
+// Colocar um aviso prévio (buzzer, led)
+void alertarInatividade() {
+  
+}
+
+/**
+ * Inicia os processos do módulo Segurança
+ */
+void checarSeguranca() {
+  checarVidaMotorista();
+  checarTemperatura();
+  checarBotaoCooler();
+}
+
 /** Executa os processos paralelos do sistema */
-void executarProcessos()
-{
+void executarProcessos() {
   atualizarVelocidade();
   checarSeguranca();
 }
@@ -285,22 +270,19 @@ void executarProcessos()
  * Redefine as variáveis e chama a
  * função que desliga os componentes
  */
-void desligar()
-{
+void desligar() {
   isSistemaLigado = 0;   // desliga logicamente o sistema
   desligarComponentes(); // desliga todos os componentes
 }
 
 /** Liga logicamente o sistema */
-void ligar()
-{
+void ligar() {
   isSistemaLigado = 1;   // liga logicamente o sistema
   executarProcessos();   // inicia todos os processos
 }
 
 /** Inverte o estado do sistema */
-void reinicar()
-{
+void reinicar() {
   if (isSistemaLigado) {
     desligar();  
   } else {
@@ -312,35 +294,27 @@ void reinicar()
 /*                       SETUP E LOOP                       */
 /************************************************************/
 
-void setup()
-{
+void setup() {
   configurarPinos();
 }
 
-/**
- * A função loop é responsável por verificar o estad do botão
- * Inicar e, a partir disso, ditar o rumo do programa
- */
-void loop()
-{ 
-  // Checa se o botão Iniciar foi pressionado
-  int isBotaoIniciarOn = lerEstadoBotao(BTN_INICIAR);
-  
-  // Se o botão foi pressionado
-  if (isBotaoIniciarOn) {
-  
-    // Inverte o estado do sistema (ligado/desligado)
-    reinicar();
-  } else {
+void loop() { 
+    // Checa se o botão Iniciar foi pressionado
+    int isBotaoIniciarOn = lerEstadoBotao(BTN_INICIAR);
     
-    // Se o botão não foi pressionado, o sistema permanece
-    // os processos onde estavam, parados ou executando
-    if (isSistemaLigado) {
-      executarProcessos();
+    // Se o botão foi pressionado
+    if (isBotaoIniciarOn) {
+    
+      // Inverte o estado do sistema (ligado/desligado)
+      reinicar();
+    } else {
+      
+      // Se o botão não foi pressionado, o sistema permanece
+      // os processos onde estavam, parados ou executando
+      if (isSistemaLigado) {
+        executarProcessos();
+      }
+      
+      // não faz nada se estiver desligado ¯\_(ツ)_/¯
     }
-    
-    // não faz nada se estiver desligado ¯\_(ツ)_/¯
-  }
-  
-  delay(10); // um pouco de delay para melhorar a performance
 }

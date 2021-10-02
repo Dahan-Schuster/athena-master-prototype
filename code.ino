@@ -17,43 +17,45 @@
 /*                         DIRETIVAS                         */
 /*************************************************************/
 
-/* Entradas */
+/* Entradas e saídas */
 
-// entrada digital
-#define BTN_INICIAR       33
-#define BTN_RESFRIAMENTO  32
-#define BTN_FALA          25
+// botão de ligar/desligar o sistema
+#define BTN_INICIAR       16
 
-// entrada analógica
-#define HALL_ACELERACAO   5
-#define HALL_FRENAGEM     17
-#define HALL_ROTACAO      16
-#define HALL_VELOCIDADE   18
+#define HALL_ACELERACAO   39
+#define HALL_FRENAGEM     36
+#define HALL_ROTACAO      34
+#define HALL_VELOCIDADE   35
 
-#define SENSOR_TEMP       14
-#define DHT_TYPE          DHT11
+#define SENSOR_DHT        13
 
-/* Saídas */
+#define BTN_RESFRIAMENTO  15
+#define COOLER            19
 
-// saída digital
 #define LED_BTN_FALA      0
-
-#define LED_ERRO_INTERNO  0
-
-// usado para alertas gerais
-#define BUZZER            0
-
-
-// saída analógica
-#define COOLER            0
-
+#define BTN_FALA          0
 #define PLAYER            0
 
-#define OLED_SCL          22 // pino I2C
-#define OLED_SDA          21 // pino I2C
+#define OLED_SCL          22 // pino I2C SCL
+#define OLED_SDA          21 // pino I2C SDA
 #define OLED_RESET        -1 // pino reset (-1 caso o display não possua)
 
+
+// botões de confirmação de vida
+#define BTN_CONFIRMAR_VIDA          26
+#define BTN_CONFIRMAR_VIDA_BACKUP   27
+
+// leds de alerta
+#define LED_ALERTA_CONFIRMACAO      14
+#define LED_ALERTA_INATIVIDADE      12
+#define LED_ALERTA_ERRO_INTERNO     2
+
+// buzzer para alertas gerais
+#define BUZZER                      4
+
 /* Constantes */
+
+#define DHT_TYPE          DHT11
 
 #define TEMP_MAX          30 // °C
 #define HUMD_MAX          90 // % 
@@ -78,14 +80,6 @@
  * não tiver sido pressionado, todo o sistema é interrompido
  */
 
-// botão de confirmação padrão
-#define BTN_CONFIRMAR_VIDA          35
-// botão de confirmação backup
-#define BTN_CONFIRMAR_VIDA_BACKUP   36
-
-#define LED_ALERTA_CONFIRMACAO      0
-#define LED_INATIVIDADE             0
-
 // intervalo de checagem de inatividade do motorista
 #define SYSTEM_INTERRUPT_TIMEOUT    1000 * 60 * 5   // 5 min
 
@@ -109,7 +103,7 @@
 Metro taskBotaoMicrofone = Metro(500);        // 0.5 s
 Metro taskBotaoCooler = Metro(500);           // 0.5 s
 Metro taskAtualizarVelocidade = Metro(50);    // 50 ms
-Metro taskChecarTemperatura = Metro(10000);   // 10 s
+Metro taskChecarTemperatura = Metro(1000);    // 1 s
 Metro taskMostrarDadosDisplay = Metro(200);   // 0.2 s
 
 // timestamp utilizado para controle do alerta de checagem de vida
@@ -140,7 +134,7 @@ static const PROGMEM uint8_t lifeIcon[16 * 16 / 8] = {
 };
 
 // sensor de temperatura e humidade
-DHT dht(SENSOR_TEMP, DHT_TYPE);
+DHT dht(SENSOR_DHT, DHT_TYPE);
 
 // variáveis de estado (guardam o valor dos sensores)
 int isSistemaLigado = 0;
@@ -171,28 +165,29 @@ float rotacaoAtual = 0;
 /************************************************************/
 
 /** Configura a utilização dos pinos do Arduino */
-// FIXME: revisar configuração dos pinos
 void configurarPinos() {
   pinMode(BTN_INICIAR, INPUT);
-  pinMode(BTN_CONFIRMAR_VIDA, INPUT);
-  pinMode(BTN_CONFIRMAR_VIDA_BACKUP, INPUT);
-  pinMode(BTN_FALA, INPUT);
-  pinMode(BTN_RESFRIAMENTO, INPUT);
+
   pinMode(HALL_ACELERACAO, INPUT);
   pinMode(HALL_FRENAGEM, INPUT);
   pinMode(HALL_ROTACAO, INPUT);
   pinMode(HALL_VELOCIDADE, INPUT);
-  pinMode(SENSOR_TEMP, INPUT);
 
-  pinMode(LED_BTN_FALA, OUTPUT);
-  pinMode(LED_ERRO_INTERNO, OUTPUT);
-  pinMode(LED_INATIVIDADE, OUTPUT);
-  pinMode(LED_ALERTA_CONFIRMACAO, OUTPUT);
-  pinMode(BUZZER, OUTPUT);
+  pinMode(BTN_RESFRIAMENTO, INPUT);
   pinMode(COOLER, OUTPUT);
-  pinMode(PLAYER, OUTPUT);
 
-  digitalWrite(LED_ERRO_INTERNO, LOW);
+  // pinMode(LED_BTN_FALA, OUTPUT);
+  // pinMode(BTN_FALA, INPUT);
+  // pinMode(PLAYER, OUTPUT);
+
+  pinMode(BTN_CONFIRMAR_VIDA, INPUT);
+  pinMode(BTN_CONFIRMAR_VIDA_BACKUP, INPUT);
+
+  pinMode(LED_ALERTA_INATIVIDADE, OUTPUT);
+  pinMode(LED_ALERTA_CONFIRMACAO, OUTPUT);
+  pinMode(LED_ALERTA_ERRO_INTERNO, OUTPUT);
+  
+  pinMode(BUZZER, OUTPUT);
 
   dht.begin();
 }
@@ -248,10 +243,6 @@ float getValorAnalogicoDigital(int pin) {
   return valorAnalogico * 5 / 1023.0;
 }
 
-// TODO: leitura do microfone
-int captarVozMicrofone() {
-}
-
 /** Envia o comando de desligar a todos os componentes */
 void desligarComponentes() {
   desligarCooler();
@@ -259,10 +250,9 @@ void desligarComponentes() {
   isMicrofoneAtivo = 0;
   digitalWrite(LED_BTN_FALA, LOW);
 
-  digitalWrite(LED_ERRO_INTERNO, LOW);
-
+  digitalWrite(LED_ALERTA_ERRO_INTERNO, LOW);
   digitalWrite(LED_ALERTA_CONFIRMACAO, LOW);
-  digitalWrite(LED_INATIVIDADE, LOW);
+  digitalWrite(LED_ALERTA_INATIVIDADE, LOW);
 
   noTone(BUZZER);
 
@@ -353,7 +343,7 @@ void alertarAguardandoConfirmacao() {
 
 /** Liga os componentes que alertam a inatividade do motorista */
 void alertarInatividade() {
-  digitalWrite(LED_INATIVIDADE, HIGH);
+  digitalWrite(LED_ALERTA_INATIVIDADE, HIGH);
   tone(BUZZER, 550);
 }
 
@@ -471,6 +461,7 @@ void mostrarDadosNoDisplay() {
 }
 
 /** Executa os processos paralelos do sistema */
+// TODO: módulo comunicação
 void executarProcessos() {
   atualizarVelocidade();
   checarSeguranca();
@@ -484,11 +475,11 @@ void alertarErroInterno(int codigoErro) {
 
   while(true) {
     for (i = 0; i < codigoErro; i++) {
-      digitalWrite(LED_ERRO_INTERNO, HIGH);
+      digitalWrite(LED_ALERTA_ERRO_INTERNO, HIGH);
       tone(BUZZER, 440, 500);
       delay(800);
       noTone(BUZZER);
-      digitalWrite(LED_ERRO_INTERNO, LOW);
+      digitalWrite(LED_ALERTA_ERRO_INTERNO, LOW);
     }
 
     delay(1250);

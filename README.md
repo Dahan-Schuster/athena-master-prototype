@@ -6,12 +6,14 @@
   - [x] Módulo de velocidade
     - [x] Leitura dos sensores de aceleração e frenagem
     - [x] Leitura dos sensores de rotação e velocidade
-    
-  - [ ] Módulo de segurança
+
+  - [x] Módulo de segurança
     - [x] Leitura do sensor de temperatura
-    - [ ] Leitura do botão de motorista vivo
+    - [x] Leitura do botão de motorista vivo
     - [x] Leitura do botão de ativação da ventoinha
     - [x] Ativação da ventoinha
+    - [x] Alerta de confirmação de vida
+    - [x] Alerta de inatividade
 
   - [ ] Módulo de comunicação
     - [ ] Leitura do botão de fala
@@ -22,8 +24,12 @@
     - [x] Mostrar dados de velocidade
     - [x] Mostrar temperatura e humidade
     - [x] Mostrar ícones do cooler e do microfone
+    - [x] Mostrar situação de vida do motorista (vivo / confirmação pendente)
 
   - [x] Mostrar problemas encontrados
+  - [ ] Revisar configuração dos pinos dos componentes
+  - [ ] Melhorar método de leitura de botão
+  - [x] Revisar componentes que precisam desligar
 
 - [ ] Diagrama
   - [ ] Módulo de velocidade

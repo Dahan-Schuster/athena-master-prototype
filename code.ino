@@ -4,12 +4,10 @@
 /*                         INCLUDES                         */
 /************************************************************/
 
-// TODO: revisar bibliotecas necessárias
-
 #include <Metro.h>                // biblioteca para facilitar multitasking
 
-#include <SPI.h>                  // protocolo de comunicação SPI
-#include <Wire.h>                 // protocolo de comunicação I2C
+#include <SPI.h>                  // protocolo de comunicação SPI (display oled)
+#include <Wire.h>                 // protocolo de comunicação I2C (display oled)
 #include <Adafruit_GFX.h>         // display oled
 #include <Adafruit_SSD1306.h>     // display oled
 
@@ -19,13 +17,10 @@
 /*                         DIRETIVAS                         */
 /*************************************************************/
 
-/* FIXME: pinos meramente ilustrativos enquanto não houver diagramação **/
-
 /* Entradas */
 
 // entrada digital
 #define BTN_INICIAR       33
-#define BTN_TOVIVO        35
 #define BTN_RESFRIAMENTO  32
 #define BTN_FALA          25
 
@@ -45,7 +40,7 @@
 
 #define LED_ERRO_INTERNO  0
 
-#define LED_INATIVIDADE   0
+// usado para alertas gerais
 #define BUZZER            0
 
 
@@ -65,9 +60,6 @@
 
 #define VELOCIDADE_COOLER 100
 
-// tempo de checagem de inatividade do motorista
-#define DELAY_SEGURANCA   60000 * 5 // 300000 ms = 5 min
-
 // tamanho da tela do display oled
 #define SCREEN_WIDTH      128 // px
 #define SCREEN_HEIGHT      64 // px
@@ -77,14 +69,36 @@
 #define CODIGO_ERRO_DHT     5
 
 
-// dimensões dos ícones mostrados no display oled
-#define COOLER_ICON_HEIGHT   16
-#define COOLER_ICON_WIDTH    16
-#define COOLER_PX_PER_BYTE   8
+/** 
+ * DIRETIVAS DE CHECAGEM DE VIDA DO MOTORISTA
+ * ------------------------------------------
+ * A cada 4min30s é iniciado o alerta de confirmação
+ * de vida pendente. Durante os próximos 30s, um alerta
+ * é emitido. Passados 5 min ao total e o botão de confirmação
+ * não tiver sido pressionado, todo o sistema é interrompido
+ */
 
-#define MIC_ICON_HEIGHT   16
-#define MIC_ICON_WIDTH    16
-#define MIC_PX_PER_BYTE   8
+// botão de confirmação padrão
+#define BTN_CONFIRMAR_VIDA          35
+// botão de confirmação backup
+#define BTN_CONFIRMAR_VIDA_BACKUP   36
+
+#define LED_ALERTA_CONFIRMACAO      0
+#define LED_INATIVIDADE             0
+
+// intervalo de checagem de inatividade do motorista
+#define SYSTEM_INTERRUPT_TIMEOUT    1000 * 60 * 5   // 5 min
+
+// intervalo entre os alertas de checagem de inatividade
+#define LIFE_CHECK_ALERT_DELAY      1000 * 60 * 4.5 // 4min30s
+
+// intervalo entre os beeps de alerta da próxima checagem
+#define LIFE_CHECK_ALERT_BEEP_DELAY 300
+
+/**
+ * FIM DIRETIVAS DE CHECAGEM DE VIDA DO MOTORISTA
+ * ----------------------------------------------
+ */
 
 /************************************************************/
 /*                    VARIÁVEIS GLOBAIS                     */
@@ -96,20 +110,31 @@ Metro taskBotaoMicrofone = Metro(500);        // 0.5 s
 Metro taskBotaoCooler = Metro(500);           // 0.5 s
 Metro taskAtualizarVelocidade = Metro(50);    // 50 ms
 Metro taskChecarTemperatura = Metro(10000);   // 10 s
-Metro taskSeguranca = Metro(DELAY_SEGURANCA); // 5 min
 Metro taskMostrarDadosDisplay = Metro(200);   // 0.2 s
+
+// timestamp utilizado para controle do alerta de checagem de vida
+// escolhido ao invés do Metro para obter maior controle sobre a tarefa
+unsigned long int tsLifeCheckAlert = millis();
+unsigned long int tsToggleAlert = millis();
+unsigned long int tsSystemInterruptTimeout = millis();
 
 // Display oled
 Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 
 // array bitmap do ícone de cooler mostrado no display
-static const PROGMEM uint8_t coolerIcon[COOLER_ICON_WIDTH * COOLER_ICON_HEIGHT / COOLER_PX_PER_BYTE] = { 
+static const PROGMEM uint8_t coolerIcon[16 * 16 / 8] = { 
   0x03, 0x00, 0x0F, 0x10, 0x0F, 0x3C, 0x0F, 0x7E, 0x47, 0x7C, 0xF7, 0xF0, 0xFF, 0xE0, 0xFE, 0x7E,
   0x7E, 0x7F, 0x07, 0xFF, 0x0F, 0xEF, 0x3E, 0xE2, 0x7E, 0xF0, 0x3C, 0xF0, 0x08, 0xF0, 0x00, 0xC0
 };
 
 // array bitmap do ícone de microfone mostrado no display
-static const PROGMEM uint8_t micIcon[MIC_ICON_WIDTH * MIC_ICON_HEIGHT / MIC_PX_PER_BYTE] = { 
+static const PROGMEM uint8_t micIcon[16 * 16 / 8] = { 
+  0x1C, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0xBE, 0x80,
+  0xBE, 0x80, 0xBE, 0x80, 0xDD, 0x80, 0x63, 0x00, 0x3E, 0x00, 0x08, 0x00, 0x08, 0x00, 0x3E, 0x00
+};
+
+// array bitmap do ícone de coração (confirmação de vida pendente) mostrado no display
+static const PROGMEM uint8_t lifeIcon[16 * 16 / 8] = { 
   0x1C, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0x3E, 0x00, 0xBE, 0x80,
   0xBE, 0x80, 0xBE, 0x80, 0xDD, 0x80, 0x63, 0x00, 0x3E, 0x00, 0x08, 0x00, 0x08, 0x00, 0x3E, 0x00
 };
@@ -124,7 +149,7 @@ int isCoolerAtivo = 0;
 
 int isMicrofoneAtivo = 0;
 
-int isMotoristaVivo = 1;
+int isConfirmacaoVidaPendente = 0;
 
 float temperaturaAtual = 0;
 
@@ -149,7 +174,8 @@ float rotacaoAtual = 0;
 // FIXME: revisar configuração dos pinos
 void configurarPinos() {
   pinMode(BTN_INICIAR, INPUT);
-  pinMode(BTN_TOVIVO, INPUT);
+  pinMode(BTN_CONFIRMAR_VIDA, INPUT);
+  pinMode(BTN_CONFIRMAR_VIDA_BACKUP, INPUT);
   pinMode(BTN_FALA, INPUT);
   pinMode(BTN_RESFRIAMENTO, INPUT);
   pinMode(HALL_ACELERACAO, INPUT);
@@ -161,6 +187,7 @@ void configurarPinos() {
   pinMode(LED_BTN_FALA, OUTPUT);
   pinMode(LED_ERRO_INTERNO, OUTPUT);
   pinMode(LED_INATIVIDADE, OUTPUT);
+  pinMode(LED_ALERTA_CONFIRMACAO, OUTPUT);
   pinMode(BUZZER, OUTPUT);
   pinMode(COOLER, OUTPUT);
   pinMode(PLAYER, OUTPUT);
@@ -211,9 +238,7 @@ int lerEstadoBotao(int pin) {
   return estado;
 }
 
-/**
- * Lê o valor de um pino como analógico e o retorna convertido para digital
- */
+/** Lê o valor de um pino como analógico e o retorna convertido para digital */
 float getValorAnalogicoDigital(int pin) {
   // Lê o valor analógico do potenciômetro,
   // que varia entre 0 e 1023
@@ -228,9 +253,20 @@ int captarVozMicrofone() {
 }
 
 /** Envia o comando de desligar a todos os componentes */
-// TODO: revisar componentes que precisam desligar
 void desligarComponentes() {
+  desligarCooler();
 
+  isMicrofoneAtivo = 0;
+  digitalWrite(LED_BTN_FALA, LOW);
+
+  digitalWrite(LED_ERRO_INTERNO, LOW);
+
+  digitalWrite(LED_ALERTA_CONFIRMACAO, LOW);
+  digitalWrite(LED_INATIVIDADE, LOW);
+
+  noTone(BUZZER);
+
+  display.clearDisplay();
 }
 
 
@@ -240,9 +276,8 @@ void desligarComponentes() {
 /*           Determinam a lógica de funcionamento           */
 /************************************************************/
 
-/**
- * Faz a leitura dos sensores de velocidade e atualiza as variáveis
- */
+
+/** Faz a leitura dos sensores de velocidade e atualiza as variáveis */
 void atualizarVelocidade() {
   // verifica se é hora de checar os sensores de velocidade
   if (taskAtualizarVelocidade.check()) {
@@ -253,9 +288,7 @@ void atualizarVelocidade() {
   }
 }
 
-/**
- * Faz a leitura dos sensores de temperatura e liga/desliga o cooler de acordo
- */
+/** Faz a leitura dos sensores de temperatura e liga/desliga o cooler de acordo */
 void checarTemperatura() {
   if (taskChecarTemperatura.check()) {
     temperaturaAtual = dht.readTemperature();
@@ -294,31 +327,74 @@ void checarBotaoCooler() {
   }
 }
 
-/**
- * Verifica sinais vitais do motorista e dispara o alerta de inatividade
- * FIXME:
- *  Colocar um aviso prévio (buzzer, led)
- *  Colocar outro botão de segurança por backup
- */
-void checarVidaMotorista() {
-  // verifica se é hora de checar se o motorista está vivo
-  if (taskSeguranca.check()) {
-    int isMotoristaVivo = lerEstadoBotao(BTN_TOVIVO);
+/** Desliga os componentes que alertam que a confirmação de vida está pendente */
+void desligarAlertaConfirmacao() {
+  isConfirmacaoVidaPendente = 0;
+  digitalWrite(LED_ALERTA_CONFIRMACAO, LOW);
+  noTone(BUZZER);
+}
 
-    if (!isMotoristaVivo)
-      alertarInatividade();
+/** Beepa repetidamente para alertar que a confirmação de vida está pendente */
+void alertarAguardandoConfirmacao() {
+  isConfirmacaoVidaPendente = 1;
+
+  if (millis() - tsToggleAlert < LIFE_CHECK_ALERT_BEEP_DELAY) {
+    digitalWrite(LED_ALERTA_CONFIRMACAO, HIGH);
+    tone(BUZZER, 440, LIFE_CHECK_ALERT_BEEP_DELAY);
+  } else {
+    digitalWrite(LED_ALERTA_CONFIRMACAO, LOW);
+    noTone(BUZZER);
+  }
+  
+  if (millis() - tsToggleAlert > LIFE_CHECK_ALERT_BEEP_DELAY * 2) {
+    tsToggleAlert = millis();
   }
 }
 
-// TODO: alerta de inatividade do motorista
-// Colocar um aviso prévio (buzzer, led)
+/** Liga os componentes que alertam a inatividade do motorista */
 void alertarInatividade() {
-  
+  digitalWrite(LED_INATIVIDADE, HIGH);
+  tone(BUZZER, 550);
 }
 
-/**
- * Inicia os processos do módulo Segurança
- */
+/** Suprime os alertas de inatividade do motorista */
+void desligarAlertaInatividade() {
+  digitalWrite(13, LOW);
+  noTone(BUZZER);
+}
+
+/** Verifica sinais vitais do motorista e dispara o alerta de inatividade */
+void checarVidaMotorista() {
+  // a cada X segundos, começa o alerta de aguardando confirmação
+  if (millis() - tsLifeCheckAlert >= LIFE_CHECK_DELAY) {
+    // aguarda a confirmação de vida
+    int isMotoristaVivo = digitalRead(BTN_CONFIRMAR_VIDA);
+    int isMotoristaVivobBackup = digitalRead(BTN_CONFIRMAR_VIDA_BACKUP);
+
+    // quando o motorista confirmar que está vivo...
+    if (isMotoristaVivo || isMotoristaVivobBackup) {
+      // atualiza os intervalos e desliga os alertas
+      tsLifeCheckAlert = millis();
+      tsSystemInterruptTimeout = millis();
+
+      desligarAlertaConfirmacao();
+      desligarAlertaInatividade();
+    }
+    
+    // se o motorista excedeu o tempo de confirmação...
+    else if (millis() - tsSystemInterruptTimeout >= SYSTEM_INTERRUPT_TIMEOUT) {
+      desligar();           // encerra os processos do sistema
+      alertarInatividade(); // alerta a inatividade do motorista
+    }
+
+    // se ainda está no intervalo de espera de confirmação...
+    else {
+      alertarAguardandoConfirmacao();
+    }
+  }
+}
+
+/** Inicia os processos do módulo Segurança */
 void checarSeguranca() {
   checarVidaMotorista();
   checarTemperatura();
@@ -329,11 +405,7 @@ void checarSeguranca() {
 void mostrarDadosNoDisplay() {
   if (taskMostrarDadosDisplay.check()) {
     display.clearDisplay();
-    
-    // aceleração
-    // rotação
-    // frenagem
-
+  
     // temperatura
     display.setTextSize(1);
     display.setCursor(0,0);
@@ -360,22 +432,38 @@ void mostrarDadosNoDisplay() {
     display.setCursor(0, 42);
     display.print(velocidadeAtual);
 
-    // Ícone cooler
-    static int coolerIconDisplayed = 0; // usado para fazer o ícone piscar na tela
-    if (isCoolerAtivo) {
-      if (!coolerIconDisplayed)
-        display.drawBitmap(95, 40, coolerIcon, COOLER_ICON_WIDTH, COOLER_ICON_HEIGHT, 1);
-
-      coolerIconDisplayed = !coolerIconDisplayed;
-    }
-
     // Ícone microfone
     static int micIconDisplayed = 0;    // usado para fazer o ícone piscar na tela
     if (isMicrofoneAtivo) {
       if (!micIconDisplayed)
-        display.drawBitmap(115, 40, micIcon, MIC_ICON_WIDTH, MIC_ICON_HEIGHT, 1);
+        display.drawBitmap(75, 40, micIcon, MIC_ICON_WIDTH, MIC_ICON_HEIGHT, 1);
 
       micIconDisplayed = !micIconDisplayed;
+    }
+
+    // Ícone cooler
+    static int coolerIconDisplayed = 0; // usado para fazer o ícone piscar na tela
+    if (isCoolerAtivo) {
+      if (!coolerIconDisplayed)
+        display.drawBitmap(90, 40, coolerIcon, COOLER_ICON_WIDTH, COOLER_ICON_HEIGHT, 1);
+
+      coolerIconDisplayed = !coolerIconDisplayed;
+    }
+
+    // Ícone situação vida motorista
+    static int lifeIconDisplayed = 0;
+
+    // se estiver pendente, pisca o ícone de coração
+    if (isConfirmacaoVidaPendente) {
+      if (!lifeIconDisplayed)
+        display.drawBitmap(110, 40, lifeIcon, MIC_ICON_WIDTH, MIC_ICON_HEIGHT, 1);
+
+      lifeIconDisplayed = !lifeIconDisplayed;
+    }
+    
+    // se não estiver pendente, mostra o ícone estático
+    else {
+        display.drawBitmap(110, 40, lifeIcon, 16, 16, 1);
     }
 
     display.display();
@@ -413,19 +501,22 @@ void alertarErroInterno(int codigoErro) {
 /*      Controlam o estado de funcionamento do sistema      */
 /************************************************************/
 
-/**
- * Redefine as variáveis e chama a
- * função que desliga os componentes
- */
+/** Desliga logicamente o sistema e chama a função que para os componentes */
 void desligar() {
-  isSistemaLigado = 0;   // desliga logicamente o sistema
-  desligarComponentes(); // desliga todos os componentes
+  isSistemaLigado = 0;
+  desligarComponentes();
 }
 
-/** Liga logicamente o sistema */
+/** Liga logicamente o sistema e inicia os processos paralelos */
 void ligar() {
-  isSistemaLigado = 1;   // liga logicamente o sistema
-  executarProcessos();   // inicia todos os processos
+  desligarComponentes();
+  
+  // redefine os timestamps
+  tsSystemInterruptTimeout =  millis();
+  tsLifeCheckAlert = millis();
+
+  isSistemaLigado = 1;
+  executarProcessos();
 }
 
 /** Inverte o estado do sistema */

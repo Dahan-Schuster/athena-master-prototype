@@ -32,7 +32,8 @@
   - [x] Revisar componentes que precisam desligar
 
 - [ ] Diagrama
-  - [ ] Módulo de velocidade
-  - [ ] Módulo de segurança
+  - [x] Módulo de velocidade
+  - [x] Módulo de segurança
   - [ ] Módulo de comunicação
-  - [ ] Display Oled
+  - [x] Módulo display oled
+  - [x] Módulo de alerta

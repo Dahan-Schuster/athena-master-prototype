@@ -1,4 +1,4 @@
-# Anotações | Athenas - Projeto 0
+# Anotações | Athena - Projeto 0
 
 ## A fazer
 
